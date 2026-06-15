@@ -23,8 +23,8 @@ node_modules/
 Thumbs.db
 
 # Build outputs
-dist/
-build/
+backend/dist/
+backend/build/
 *.egg-info/
 splunk-app/
 
