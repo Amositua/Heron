@@ -43,7 +43,7 @@ async def run_genesis(build_id: str, prompt: str, output_root: Path) -> None:
             await _emit(
                 build_id,
                 "file_written",
-                {"filename": str(file_path.relative_to(result.app_path)), "content": content},
+                {"filename": file_path.relative_to(result.app_path).as_posix(), "content": content},
             )
             await asyncio.sleep(STREAM_STEP_DELAY_SECONDS)
 
