@@ -90,6 +90,30 @@ class SplunkClient:
         except Exception:
             return False
 
+    def list_alerts(self, app_name: str) -> list[dict[str, Any]]:
+        service = self._connect()
+        alerts: list[dict[str, Any]] = []
+        for saved_search in service.saved_searches:
+            if saved_search.access.app != app_name:
+                continue
+            content = dict(saved_search.content)
+            if content.get("is_scheduled") != "1":
+                continue
+            alert_type = content.get("alert_type")
+            if not alert_type or alert_type == "always":
+                continue
+            alerts.append(
+                {
+                    "name": saved_search.name,
+                    "search": content.get("search", ""),
+                    "alert_threshold": content.get("alert_threshold"),
+                    "alert_comparator": content.get("alert_comparator"),
+                    "alert_type": alert_type,
+                    "earliest_time": content.get("dispatch.earliest_time", "-10m"),
+                }
+            )
+        return alerts
+
     def get_alert_firing_history(self, alert_name: str, count: int = 50) -> list[dict[str, Any]]:
         service = self._connect()
         try:
