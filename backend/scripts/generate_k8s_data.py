@@ -33,6 +33,7 @@ def _make_pod_name(prefix: str) -> str:
 def build_event(
     pod_name: str,
     node: str,
+    k8s_type: str,
     event_type: str,
     reason: str,
     message_template: str,
@@ -69,7 +70,7 @@ def build_event(
         "firstTimestamp": first_timestamp,
         "lastTimestamp": last_timestamp,
         "count": count,
-        "type": event_type,
+        "type": k8s_type,
         "reportingComponent": "kubelet",
         "reportingInstance": node,
         "pod_name": pod_name,
@@ -103,11 +104,13 @@ def run(mode: str, duration_minutes: float | None, output_path: Path) -> None:
 
             if random.random() < restart_probability:
                 restart_counts[pod] += 1
-                event_type, reason, message = RESTART_EVENT
-                event = build_event(pod, node, event_type, reason, message, restart_counts[pod], restart_counts[pod], now)
+                k8s_type, reason, message = RESTART_EVENT
+                event = build_event(
+                    pod, node, k8s_type, "restart", reason, message, restart_counts[pod], restart_counts[pod], now
+                )
             else:
-                event_type, reason, message = random.choice(NORMAL_EVENTS)
-                event = build_event(pod, node, event_type, reason, message, 1, restart_counts[pod], now)
+                k8s_type, reason, message = random.choice(NORMAL_EVENTS)
+                event = build_event(pod, node, k8s_type, "normal", reason, message, 1, restart_counts[pod], now)
 
             handle.write(json.dumps(event) + "\n")
             handle.flush()
