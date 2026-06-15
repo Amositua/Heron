@@ -5,8 +5,10 @@ from fastapi import FastAPI, HTTPException
 from google import genai
 from pydantic import BaseModel
 
+from heron.approver.approver import Approver
 from heron.builder.builder import Builder
 from heron.deployer.deployer import Deployer
+from heron.models.approval import ApplyResult, AppSummary, ChangelogEntry, RollbackResult, RoutingDecision
 from heron.models.build_plan import BuildPlan
 from heron.models.build_result import BuildResult
 from heron.models.deploy_result import DeployResult
@@ -14,6 +16,7 @@ from heron.models.observation import ObservationReport
 from heron.models.proposal import Proposal
 from heron.observer.observer import Observer
 from heron.planner.planner import Planner, PlannerError
+from heron.splunk.mcp_client import SplunkMCPClient
 from heron.splunk.splunk_client import SplunkClient
 from heron.storage.db import DBClient
 from heron.tuner.tuner import Tuner, TunerError
@@ -77,6 +80,10 @@ def _gemini_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+def _approver(db: DBClient) -> Approver:
+    return Approver(Deployer(), SplunkMCPClient(), db)
+
+
 @app.get("/api/observe/{app_name}")
 async def get_observation(app_name: str) -> ObservationReport:
     db = DBClient()
@@ -105,6 +112,8 @@ class ObserveRunRequest(BaseModel):
 class ObserveRunResult(BaseModel):
     report: ObservationReport
     proposals: list[Proposal]
+    routing: list[RoutingDecision]
+    applied: list[ApplyResult]
 
 
 @app.post("/api/observe/run")
@@ -122,7 +131,77 @@ async def trigger_observe_run(request: ObserveRunRequest) -> ObserveRunResult:
     except TunerError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    approver = _approver(db)
+    routing: list[RoutingDecision] = []
+    applied: list[ApplyResult] = []
     for proposal in proposals:
         await db.store_proposal(proposal)
 
-    return ObserveRunResult(report=report, proposals=proposals)
+        decision = await approver.route(proposal)
+        routing.append(decision)
+        if decision.action == "auto_apply":
+            applied.append(await approver.apply(proposal))
+
+    return ObserveRunResult(report=report, proposals=proposals, routing=routing, applied=applied)
+
+
+@app.post("/api/proposals/{proposal_id}/approve")
+async def approve_proposal(proposal_id: str) -> ApplyResult:
+    db = DBClient()
+    await db.init_schema()
+
+    proposal = await db.get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail=f"proposal '{proposal_id}' not found")
+
+    result = await _approver(db).apply(proposal)
+    if not result.success:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result
+
+
+class RejectRequest(BaseModel):
+    reason: str
+
+
+@app.post("/api/proposals/{proposal_id}/reject")
+async def reject_proposal(proposal_id: str, request: RejectRequest) -> dict[str, str]:
+    db = DBClient()
+    await db.init_schema()
+
+    proposal = await db.get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail=f"proposal '{proposal_id}' not found")
+
+    await _approver(db).reject(proposal_id, request.reason)
+    return {"status": "rejected", "proposal_id": proposal_id}
+
+
+@app.get("/api/changelog/{app_name}")
+async def get_changelog(app_name: str) -> list[ChangelogEntry]:
+    db = DBClient()
+    await db.init_schema()
+    return await db.list_changelog(app_name)
+
+
+class RollbackRequest(BaseModel):
+    app_name: str
+    target_version_id: int
+
+
+@app.post("/api/rollback")
+async def trigger_rollback(request: RollbackRequest) -> RollbackResult:
+    db = DBClient()
+    await db.init_schema()
+
+    result = await _approver(db).rollback(request.app_name, request.target_version_id)
+    if not result.success:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result
+
+
+@app.get("/api/apps")
+async def list_apps() -> list[AppSummary]:
+    db = DBClient()
+    await db.init_schema()
+    return await db.list_apps()
