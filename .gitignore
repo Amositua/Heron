@@ -27,3 +27,7 @@ dist/
 build/
 *.egg-info/
 splunk-app/
+
+# Logs
+logs/
+*.log
