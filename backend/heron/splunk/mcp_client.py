@@ -107,12 +107,14 @@ class SplunkMCPClient:
         else:
             raise MCPError(f"MCP tool '{tool_name}' failed: {last_error}") from last_error
 
-        if "error" in body:
-            self._audit(action, target, "failure", attempts=attempt, error=str(body["error"]))
-            raise MCPError(f"MCP tool '{tool_name}' returned an error: {body['error']}")
+        result = body.get("result", {})
+        if "error" in body or result.get("isError"):
+            error_detail = body.get("error") or _extract_error_text(result)
+            self._audit(action, target, "failure", attempts=attempt, error=str(error_detail))
+            raise MCPError(f"MCP tool '{tool_name}' returned an error: {error_detail}")
 
         self._audit(action, target, "success", attempts=attempt)
-        return body.get("result", {})
+        return result
 
     def _audit(self, action: str, target: str, outcome: str, *, attempts: int, error: str | None = None) -> None:
         entry: dict[str, Any] = {
@@ -128,3 +130,12 @@ class SplunkMCPClient:
         logger.info("mcp_audit", extra={"audit": entry})
         with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
+
+
+def _extract_error_text(result: dict[str, Any]) -> str:
+    content = result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                return item.get("text", "")
+    return str(result)
