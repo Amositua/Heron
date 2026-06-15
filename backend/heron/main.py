@@ -1,7 +1,11 @@
+import asyncio
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from google import genai
 from pydantic import BaseModel
 
@@ -20,10 +24,19 @@ from heron.splunk.mcp_client import SplunkMCPClient
 from heron.splunk.splunk_client import SplunkClient
 from heron.storage.db import DBClient
 from heron.tuner.tuner import Tuner, TunerError
+from heron.ui_stream.bus import bus
+from heron.ui_stream.pipeline import run_genesis
 
 SPLUNK_APP_OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "splunk-app"
 
 app = FastAPI(title="Heron")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -50,6 +63,31 @@ async def create_build(plan: BuildPlan) -> BuildResult:
     result = builder.build(plan, str(SPLUNK_APP_OUTPUT_ROOT))
     _plan_path(result.app_path).write_text(plan.model_dump_json(indent=2), encoding="utf-8")
     return result
+
+
+@app.post("/api/build/start")
+async def start_build(request: PlanRequest) -> dict[str, str]:
+    build_id = str(uuid.uuid4())
+    bus.create(build_id)
+    asyncio.create_task(run_genesis(build_id, request.prompt, SPLUNK_APP_OUTPUT_ROOT))
+    return {"build_id": build_id}
+
+
+@app.get("/api/build/stream/{build_id}")
+async def stream_build(build_id: str) -> StreamingResponse:
+    queue = bus.get(build_id)
+    if queue is None:
+        raise HTTPException(status_code=404, detail=f"build '{build_id}' not found")
+
+    async def event_generator():
+        while True:
+            event = await queue.get()
+            yield event.to_sse()
+            if event.type in ("complete", "error"):
+                bus.remove(build_id)
+                break
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 class DeployRequest(BaseModel):
