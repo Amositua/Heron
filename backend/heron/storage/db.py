@@ -34,12 +34,15 @@ CREATE TABLE IF NOT EXISTS proposals (
 
 CREATE TABLE IF NOT EXISTS applied_changes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    proposal_id TEXT NOT NULL,
+    proposal_id TEXT,
     app_name TEXT NOT NULL,
     change_type TEXT NOT NULL,
     target_json TEXT NOT NULL,
     previous_value_json TEXT NOT NULL,
     new_value_json TEXT NOT NULL,
+    message TEXT NOT NULL,
+    before_version INTEGER NOT NULL,
+    after_version INTEGER NOT NULL,
     applied_at TEXT NOT NULL,
     rolled_back INTEGER NOT NULL DEFAULT 0
 );
@@ -124,19 +127,22 @@ class DBClient:
 
     async def store_applied_change(
         self,
-        proposal_id: str,
+        proposal_id: str | None,
         app_name: str,
         change_type: str,
         target: dict[str, Any],
         previous_value: Any,
         new_value: Any,
+        message: str,
+        before_version: int,
+        after_version: int,
     ) -> int:
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
                 """INSERT INTO applied_changes
                    (proposal_id, app_name, change_type, target_json, previous_value_json,
-                    new_value_json, applied_at, rolled_back)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+                    new_value_json, message, before_version, after_version, applied_at, rolled_back)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
                 (
                     proposal_id,
                     app_name,
@@ -144,6 +150,9 @@ class DBClient:
                     json.dumps(target),
                     json.dumps(previous_value),
                     json.dumps(new_value),
+                    message,
+                    before_version,
+                    after_version,
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
@@ -205,8 +214,28 @@ class DBClient:
                     "target": json.loads(row["target_json"]),
                     "previous_value": json.loads(row["previous_value_json"]),
                     "new_value": json.loads(row["new_value_json"]),
+                    "message": row["message"],
+                    "before_version": row["before_version"],
+                    "after_version": row["after_version"],
                     "applied_at": row["applied_at"],
                     "rolled_back": bool(row["rolled_back"]),
+                }
+                for row in rows
+            ]
+
+    async def list_apps(self) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT app_name, MAX(version) AS current_version, MAX(created_at) AS last_changed_at
+                   FROM app_versions GROUP BY app_name ORDER BY app_name"""
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "app_name": row["app_name"],
+                    "current_version": row["current_version"],
+                    "last_changed_at": row["last_changed_at"],
                 }
                 for row in rows
             ]
