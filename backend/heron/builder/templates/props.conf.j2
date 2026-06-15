@@ -1,0 +1,8 @@
+[{{ plan.data_source.sourcetype }}]
+SHOULD_LINEMERGE = false
+LINE_BREAKER = ([\r\n]+)
+TIME_PREFIX = "timestamp"\s*:\s*"
+TIME_FORMAT = %Y-%m-%dT%H:%M:%S.%6NZ
+MAX_TIMESTAMP_LOOKAHEAD = 32
+KV_MODE = json
+TRANSFORMS-heron_fields = {{ transform_names | join(',') }}

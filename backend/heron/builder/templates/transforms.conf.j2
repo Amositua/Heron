@@ -1,0 +1,6 @@
+{% for field in fields %}
+[extract_{{ field.name }}]
+REGEX = "{{ field.name }}"\s*:\s*"?([^",}]+)"?
+FORMAT = {{ field.name }}::$1
+
+{% endfor %}

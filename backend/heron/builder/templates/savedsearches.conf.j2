@@ -1,0 +1,19 @@
+{% for entry in saved_searches %}
+[{{ entry.search.name }}]
+search = {{ entry.search.spl }}
+dispatch.earliest_time = {{ entry.alert_config.earliest_time if entry.alert_config else "-24h" }}
+dispatch.latest_time = now
+cron_schedule = {{ entry.cron_schedule }}
+enableSched = 1
+description = {{ entry.search.description }}
+{% if entry.alert_config %}
+alert.severity = {{ entry.alert_config.severity }}
+alert.suppress = 0
+alert.track = 1
+alert.digest_mode = 1
+counttype = number of events
+relation = {{ entry.alert_config.relation }}
+quantity = {{ entry.alert_config.quantity }}
+{% endif %}
+
+{% endfor %}

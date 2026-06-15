@@ -1,0 +1,38 @@
+<dashboard>
+  <label>{{ dashboard_label | e }}</label>
+{% for row in panels | batch(2) %}
+  <row>
+{% for p in row %}
+    <panel>
+      <title>{{ p.panel.title | e }}</title>
+{% if p.element == "chart" %}
+      <chart>
+        <search>
+          <query>{{ p.search.spl | e }}</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">{{ p.chart_type }}</option>
+      </chart>
+{% elif p.element == "table" %}
+      <table>
+        <search>
+          <query>{{ p.search.spl | e }}</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+      </table>
+{% elif p.element == "single" %}
+      <single>
+        <search>
+          <query>{{ p.search.spl | e }}</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+      </single>
+{% endif %}
+    </panel>
+{% endfor %}
+  </row>
+{% endfor %}
+</dashboard>
